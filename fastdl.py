@@ -2,6 +2,7 @@
 import argparse
 import json
 import shutil
+import sys
 import threading
 import uuid
 import webbrowser
@@ -17,6 +18,12 @@ import uvicorn
 app = FastAPI(title="Fast HD Downloader", docs_url=None, redoc_url=None)
 jobs = {}
 lock = threading.Lock()
+BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+BIN = Path(sys.executable).resolve().parent / "bin" if getattr(sys, "frozen", False) else BASE / "bin"
+def tool(name):
+    local = BIN / (name + ".exe")
+    return str(local) if local.is_file() else shutil.which(name)
+
 DEST = Path.home() / "Downloads" / "FastHDDownloader"
 QUALITIES = {"best": None, "2160": 2160, "1440": 1440, "1080": 1080, "720": 720, "480": 480}
 FORMATS = {"mp4", "mkv", "mp3", "m4a"}
@@ -69,14 +76,15 @@ def run_download(job_id, request):
             "fragment_retries": 5,
             "progress_hooks": [hook],
         }
+        opts["ffmpeg_location"] = str(BIN) if (BIN / "ffmpeg.exe").is_file() else (tool("ffmpeg") or "ffmpeg")
         if fmt in ("mp3", "m4a"):
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": fmt,
                                         "preferredquality": "192" if fmt == "mp3" else "0"}]
         else:
             opts["merge_output_format"] = fmt
             opts["postprocessors"] = [{"key": "FFmpegVideoConvertor", "preferedformat": fmt}]
-        if shutil.which("aria2c"):
-            opts["external_downloader"] = {"http": "aria2c", "https": "aria2c"}
+        if tool("aria2c"):
+            opts["external_downloader"] = {"http": tool("aria2c"), "https": tool("aria2c")}
             opts["external_downloader_args"] = {"aria2c": ["-x", "8", "-s", "8", "-k", "1M", "--console-log-level=error"]}
         with yt_dlp.YoutubeDL(opts) as ydl:
             code = ydl.download([request.url])
@@ -88,7 +96,7 @@ def run_download(job_id, request):
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
-    return (Path(__file__).resolve().parent / "web" / "index.html").read_text(encoding="utf-8")
+    return (BASE / "web" / "index.html").read_text(encoding="utf-8")
 
 @app.post("/api/download")
 def download(req: Request):
@@ -98,7 +106,7 @@ def download(req: Request):
         raise HTTPException(400, str(exc))
     if req.quality not in QUALITIES or req.format not in FORMATS:
         raise HTTPException(400, "Unsupported quality or format")
-    if not shutil.which("ffmpeg"):
+    if not tool("ffmpeg"):
         raise HTTPException(503, "FFmpeg is required and must be available on PATH")
     with lock:
         if sum(j["status"] not in ("completed", "failed") for j in jobs.values()) >= 1:
