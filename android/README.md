@@ -1,0 +1,2 @@
+# Android alpha
+Native Java, Android 10+, no cloud backend. First milestone uses Android DownloadManager for authorized direct HTTPS MP4/MP3/M4A/WebM files. YouTube page extraction, DRM classification, content-type verification, redirect policy, media conversion, history, cancellation UI and iOS are not implemented. File extensions are not proof of media type or absence of DRM. Debug APK is for testing only; no production signing key is configured. Build with JDK 17, Gradle 8.9 and Android SDK 35: gradle -p android :app:assembleDebug :app:lintDebug.
