@@ -180,7 +180,29 @@ def main():
     parser.add_argument("--quality", choices=list(QUALITIES), default="1080")
     parser.add_argument("--format", choices=sorted(FORMATS))
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("url", nargs="?", help="Short form: fstdl URL")
+    parser.add_argument("-a", action="store_true", help="Download audio from positional URL")
+    parser.add_argument("-4k", dest="four_k", action="store_true")
+    parser.add_argument("-hd", dest="hd", action="store_true")
     args = parser.parse_args()
+    if args.url == "update":
+        print("Check releases: https://github.com/Applicationz2/Fast-HD-Downloader/releases")
+        return
+    if args.url:
+        if args.video or args.audio:
+            parser.error("Use either positional URL or explicit --video/--audio")
+        if args.a:
+            args.audio = args.url
+        else:
+            args.video = args.url
+    elif args.a or args.four_k or args.hd:
+        parser.error("A URL is required with short download flags")
+    if args.four_k and args.hd:
+        parser.error("Choose -4k or -hd")
+    if args.four_k:
+        args.quality = "2160"
+    elif args.hd:
+        args.quality = "1080"
     if args.list_formats:
         try:
             print(json.dumps(probe(args.list_formats), indent=2))
