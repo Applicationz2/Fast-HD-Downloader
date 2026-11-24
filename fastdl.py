@@ -137,7 +137,7 @@ def main():
         req = Request(url=args.video or args.audio, quality=args.quality,
                       format=args.format or ("mp3" if args.audio else "mp4"))
         check_url(req.url)
-        if not shutil.which("ffmpeg"):
+        if not tool("ffmpeg"):
             parser.error("FFmpeg must be on PATH")
         job_id = uuid.uuid4().hex
         jobs[job_id] = {"status": "queued", "percent": 0, "speed": None, "eta": None, "error": None}
