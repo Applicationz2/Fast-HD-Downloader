@@ -23,6 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install yt-dlp fastapi uvicorn pyinstaller
           choco install ffmpeg aria2 -y --no-progress
+      - name: Run offline preflight tests
+        run: python -m unittest discover -s tests -v
       - name: Build portable Lite CLI
         shell: pwsh
         run: |
@@ -41,6 +43,7 @@ jobs:
           Open fastdl/fastdl.exe for the local browser dashboard.
           In PowerShell from the extracted folder: .\fastdl\fastdl.exe --audio "YOUR_URL"
 
+          Optional: place a trusted portable deno.exe in fastdl/bin for YouTube extraction.
           No Python installation is required. Keep the extracted folders intact.
           The dashboard listens only on 127.0.0.1 and is not accessible on mobile yet.
           Files save under Downloads/FastHDDownloader.
