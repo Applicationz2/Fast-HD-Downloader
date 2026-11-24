@@ -15,12 +15,23 @@ button{background:#3275df;border:0;font-weight:700;cursor:pointer;margin-top:20p
 <form id="form"><label for="url">YouTube URL</label><input id="url" type="url" placeholder="https://www.youtube.com/watch?v=..." required maxlength="2048">
 <div class="grid"><div><label for="format">Media format</label><select id="format"><option value="mp4">MP4 video</option><option value="mkv">MKV video</option><option value="mp3">MP3 audio</option><option value="m4a">M4A audio</option></select></div>
 <div><label for="quality">Maximum resolution</label><select id="quality"><option value="best">Best available</option><option value="2160">4K</option><option value="1440">1440p</option><option value="1080" selected>1080p</option><option value="720">720p</option><option value="480">480p</option></select></div></div>
+<button id="inspect" type="button">Check available resolutions</button>
 <button id="submit" type="submit">Start download</button></form>
 <progress id="progress" value="0" max="100"></progress><p id="status" role="status" aria-live="polite">Ready</p>
 <small>Files save to your computer's Downloads/FastHDDownloader folder. This server is accessible only on this computer.</small>
 </main><script>
 const form=document.querySelector("#form"),btn=document.querySelector("#submit"),status=document.querySelector("#status"),progress=document.querySelector("#progress"),format=document.querySelector("#format"),quality=document.querySelector("#quality");
 format.addEventListener("change",()=>{quality.disabled=["mp3","m4a"].includes(format.value)});
+document.querySelector("#inspect").addEventListener("click",async ()=>{
+const inspect=document.querySelector("#inspect");
+if(!form.reportValidity())return;
+inspect.disabled=true;btn.disabled=true;status.textContent="Checking available formats...";
+try{
+const res=await fetch("/api/formats",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:document.querySelector("#url").value})});
+const data=await res.json();if(!res.ok)throw Error(data.detail||"Check failed");
+status.textContent="Available resolutions: "+(data.resolutions.map(x=>x+"p").join(", ")||"No video resolutions reported")+(data.deno_available?"":" · Portable Deno not detected");
+}catch(err){status.textContent=String(err)}finally{inspect.disabled=false;btn.disabled=false}
+});
 form.addEventListener("submit",async e=>{
 e.preventDefault();btn.disabled=true;progress.value=0;status.textContent="Starting...";
 try{

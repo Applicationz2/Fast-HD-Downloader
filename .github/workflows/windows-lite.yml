@@ -1,0 +1,100 @@
+name: Build Windows Lite ZIP
+on:
+  workflow_dispatch:
+  push:
+    branches: [v2-lite, main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build-time dependencies on GitHub runner
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install yt-dlp fastapi uvicorn pyinstaller
+          choco install ffmpeg aria2 -y --no-progress
+      - name: Run offline preflight tests
+        run: python -m unittest discover -s tests -v
+      - name: Build portable Lite CLI
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onedir --console --name fastdl --collect-all uvicorn --collect-all fastapi --collect-all yt_dlp --add-data "web;web" fastdl.py
+          Copy-Item dist/fastdl/fastdl.exe dist/fastdl/fstdl.exe
+          Copy-Item scripts/Register-fstdl.ps1 dist/Register-fstdl.ps1
+          New-Item -ItemType Directory -Force -Path dist/fastdl/bin | Out-Null
+          $ff = Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          $fp = Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Recurse -Filter ffprobe.exe | Select-Object -First 1
+          $aria = Get-ChildItem 'C:\ProgramData\chocolatey\lib\aria2' -Recurse -Filter aria2c.exe | Select-Object -First 1
+          if (-not $ff -or -not $fp -or -not $aria) { throw 'Required media binaries were not found' }
+          Copy-Item $ff.FullName dist/fastdl/bin/ffmpeg.exe
+          Copy-Item $fp.FullName dist/fastdl/bin/ffprobe.exe
+          Copy-Item $aria.FullName dist/fastdl/bin/aria2c.exe
+          @'
+          Fast HD Downloader — portable Windows package
+
+          Open fastdl/fstdl.exe for the local browser dashboard.
+          To register the short command, run from the extracted folder:
+          powershell -NoProfile -File Register-fstdl.ps1
+          Reopen your terminal and type fstdl.
+          In PowerShell from the extracted folder: .\fastdl\fastdl.exe --audio "YOUR_URL"
+
+          Optional: place a trusted portable deno.exe in fastdl/bin for YouTube extraction.
+          No Python installation is required. Keep the extracted folders intact.
+          The dashboard listens only on 127.0.0.1 and is not accessible on mobile yet.
+          Files save under Downloads/FastHDDownloader.
+          Only download media you are authorized to save.
+          '@ | Set-Content -Encoding UTF8 dist/START-HERE.txt
+      - name: Smoke test portable CLI
+        shell: pwsh
+        run: |
+          $output = & dist/fastdl/fastdl.exe --help 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "CLI smoke test failed: $output" }
+          $output | Select-Object -First 6
+          & dist/fastdl/fstdl.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "Short command smoke test failed" }
+      - name: Verify bundled media tools and dashboard
+        shell: pwsh
+        run: |
+          & dist/fastdl/bin/ffmpeg.exe -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg failed' }
+          & dist/fastdl/bin/ffprobe.exe -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFprobe failed' }
+          & dist/fastdl/bin/aria2c.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'aria2 failed' }
+          $p = Start-Process -FilePath (Resolve-Path dist/fastdl/fastdl.exe) -ArgumentList '--no-browser' -PassThru
+          try {
+            $ok = $false
+            for ($i=0; $i -lt 30; $i++) {
+              try {
+                $r = Invoke-WebRequest http://127.0.0.1:8765/ -TimeoutSec 2
+                if ($r.StatusCode -eq 200 -and $r.Content -match 'Fast HD Downloader') { $ok = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ok) { throw 'Dashboard smoke test failed' }
+          } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
+      - name: Assemble ZIP
+        shell: pwsh
+        run: Compress-Archive -CompressionLevel Optimal -Path dist/fastdl,dist/START-HERE.txt,dist/Register-fstdl.ps1 -DestinationPath Fast-HD-Downloader-Windows-Lite.zip
+      - name: Report ZIP size
+        shell: pwsh
+        run: |
+          $size = (Get-Item Fast-HD-Downloader-Windows-Lite.zip).Length
+          "Lite ZIP: $([math]::Round($size / 1MB, 2)) MiB" >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fast-HD-Downloader-Windows-Lite
+          path: Fast-HD-Downloader-Windows-Lite.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

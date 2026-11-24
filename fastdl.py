@@ -24,6 +24,40 @@ def tool(name):
     local = BIN / (name + ".exe")
     return str(local) if local.is_file() else shutil.which(name)
 
+def runtime_options():
+    deno = tool("deno")
+    return {"js_runtimes": {"deno": {"path": deno}}} if deno else {"js_runtimes": {}}
+
+def inspect_media(info):
+    if info.get("availability") in ("premium_only", "subscriber_only", "needs_auth", "private"):
+        raise ValueError("Restricted content: use the official authorized viewing service.")
+    formats = info.get("formats") or []
+    usable = [f for f in formats if not f.get("has_drm") and f.get("url")]
+    if info.get("has_drm") is True or (formats and all(f.get("has_drm") for f in formats)):
+        raise ValueError("DRM-protected content is not supported.")
+    if not usable:
+        raise ValueError("No downloadable formats found. Check access and the portable Deno runtime.")
+    return sorted({f["height"] for f in usable if isinstance(f.get("height"), int) and f.get("vcodec") != "none"})
+
+def explain_error(exc):
+    msg = str(exc)
+    lower = msg.lower()
+    if "drm" in lower:
+        return "DRM-protected content is not supported."
+    if any(s in lower for s in ("purchase", "rent this", "paid content", "members-only", "premium-only")):
+        return "Restricted content: use the official authorized viewing service."
+    if "requested format" in lower or "no video formats" in lower:
+        return "No matching format. Check available resolutions and whether portable Deno is present."
+    return msg
+
+def probe(url):
+    check_url(url)
+    with yt_dlp.YoutubeDL({"quiet": True, "noplaylist": True, "skip_download": True,
+                          "retries": 0, "extractor_retries": 0, "socket_timeout": 20,
+                          **runtime_options()}) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return {"resolutions": inspect_media(info), "deno_available": bool(tool("deno"))}
+
 DEST = Path.home() / "Downloads" / "FastHDDownloader"
 QUALITIES = {"best": None, "2160": 2160, "1440": 1440, "1080": 1080, "720": 720, "480": 480}
 FORMATS = {"mp4", "mkv", "mp3", "m4a"}
@@ -63,7 +97,15 @@ def run_download(job_id, request):
         selector = ("bestaudio/best" if fmt in ("mp3", "m4a")
                     else "bv*+ba/b" if height is None
                     else f"bv*[height<={height}]+ba/b[height<={height}]")
+        with lock:
+            jobs[job_id]["status"] = "checking"
+        metadata = probe(request.url)
+        with lock:
+            jobs[job_id].update(metadata)
         opts = {
+            **runtime_options(),
+            "extractor_retries": 0,
+            "socket_timeout": 20,
             "format": selector,
             "outtmpl": str(DEST / "%(title).180B [%(id)s].%(ext)s"),
             "noplaylist": True,
@@ -92,11 +134,18 @@ def run_download(job_id, request):
             jobs[job_id].update(status="completed" if code == 0 else "failed", percent=100 if code == 0 else jobs[job_id]["percent"])
     except Exception as exc:
         with lock:
-            jobs[job_id].update(status="failed", error=str(exc))
+            jobs[job_id].update(status="failed", error=explain_error(exc))
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
     return (BASE / "web" / "index.html").read_text(encoding="utf-8")
+
+@app.post("/api/formats")
+def available_formats(req: Request):
+    try:
+        return probe(req.url)
+    except Exception as exc:
+        raise HTTPException(400, explain_error(exc))
 
 @app.post("/api/download")
 def download(req: Request):
@@ -125,19 +174,49 @@ def status(job_id: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Fast HD Downloader local dashboard")
+    parser.add_argument("--list-formats", metavar="URL")
     parser.add_argument("--video", metavar="URL")
     parser.add_argument("--audio", metavar="URL")
     parser.add_argument("--quality", choices=list(QUALITIES), default="1080")
     parser.add_argument("--format", choices=sorted(FORMATS))
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("url", nargs="?", help="Short form: fstdl URL")
+    parser.add_argument("-a", action="store_true", help="Download audio from positional URL")
+    parser.add_argument("-4k", dest="four_k", action="store_true")
+    parser.add_argument("-hd", dest="hd", action="store_true")
     args = parser.parse_args()
+    if args.url == "update":
+        print("Check releases: https://github.com/Applicationz2/Fast-HD-Downloader/releases")
+        return
+    if args.url:
+        if args.video or args.audio:
+            parser.error("Use either positional URL or explicit --video/--audio")
+        if args.a:
+            args.audio = args.url
+        else:
+            args.video = args.url
+    elif args.a or args.four_k or args.hd:
+        parser.error("A URL is required with short download flags")
+    if args.four_k and args.hd:
+        parser.error("Choose -4k or -hd")
+    if args.four_k:
+        args.quality = "2160"
+    elif args.hd:
+        args.quality = "1080"
+    if args.list_formats:
+        try:
+            print(json.dumps(probe(args.list_formats), indent=2))
+        except Exception as exc:
+            print(explain_error(exc), file=sys.stderr)
+            raise SystemExit(1)
+        return
     if args.video and args.audio:
         parser.error("Choose --video or --audio, not both")
     if args.video or args.audio:
         req = Request(url=args.video or args.audio, quality=args.quality,
                       format=args.format or ("mp3" if args.audio else "mp4"))
         check_url(req.url)
-        if not shutil.which("ffmpeg"):
+        if not tool("ffmpeg"):
             parser.error("FFmpeg must be on PATH")
         job_id = uuid.uuid4().hex
         jobs[job_id] = {"status": "queued", "percent": 0, "speed": None, "eta": None, "error": None}
