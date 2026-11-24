@@ -29,6 +29,8 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --onedir --console --name fastdl --collect-all uvicorn --collect-all fastapi --collect-all yt_dlp --add-data "web;web" fastdl.py
+          Copy-Item dist/fastdl/fastdl.exe dist/fastdl/fstdl.exe
+          Copy-Item scripts/Register-fstdl.ps1 dist/Register-fstdl.ps1
           New-Item -ItemType Directory -Force -Path dist/fastdl/bin | Out-Null
           $ff = Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           $fp = Get-ChildItem 'C:\ProgramData\chocolatey\lib\ffmpeg' -Recurse -Filter ffprobe.exe | Select-Object -First 1
@@ -40,7 +42,10 @@ jobs:
           @'
           Fast HD Downloader — portable Windows package
 
-          Open fastdl/fastdl.exe for the local browser dashboard.
+          Open fastdl/fstdl.exe for the local browser dashboard.
+          To register the short command, run from the extracted folder:
+          powershell -NoProfile -File Register-fstdl.ps1
+          Reopen your terminal and type fstdl.
           In PowerShell from the extracted folder: .\fastdl\fastdl.exe --audio "YOUR_URL"
 
           Optional: place a trusted portable deno.exe in fastdl/bin for YouTube extraction.
@@ -55,6 +60,8 @@ jobs:
           $output = & dist/fastdl/fastdl.exe --help 2>&1
           if ($LASTEXITCODE -ne 0) { throw "CLI smoke test failed: $output" }
           $output | Select-Object -First 6
+          & dist/fastdl/fstdl.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "Short command smoke test failed" }
       - name: Verify bundled media tools and dashboard
         shell: pwsh
         run: |
@@ -78,7 +85,7 @@ jobs:
           } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
       - name: Assemble ZIP
         shell: pwsh
-        run: Compress-Archive -CompressionLevel Optimal -Path dist/fastdl,dist/START-HERE.txt -DestinationPath Fast-HD-Downloader-Windows-Lite.zip
+        run: Compress-Archive -CompressionLevel Optimal -Path dist/fastdl,dist/START-HERE.txt,dist/Register-fstdl.ps1 -DestinationPath Fast-HD-Downloader-Windows-Lite.zip
       - name: Report ZIP size
         shell: pwsh
         run: |
